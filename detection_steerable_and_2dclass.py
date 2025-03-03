@@ -125,6 +125,14 @@ for mrc_file in files_micro:
             threshold = 0.5
             contamination_mask_binary[contamination_mask_binary < threshold] = 0
             contamination_mask_binary[contamination_mask_binary >= threshold] = 1
+            # ---- Add Contamination to the Left and Right Sides ----
+            border_size = 60  # Define how many pixels from the left and right should be contaminated
+            contamination_mask_binary[:border_size, :] = 1  # Contaminate the left border
+            contamination_mask_binary[-border_size:, :] = 1  # Contaminate the right border
+
+            # Optional: You can also add contamination to the top and bottom if needed
+            contamination_mask_binary[:, :border_size] = 1  # Contaminate the top border
+            contamination_mask_binary[:, -border_size:] = 1  # Contaminate the bottom border
     else:
         contamination_mask_binary = np.zeros(Y.shape)
 
