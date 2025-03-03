@@ -110,7 +110,7 @@ for mrc_file in files_micro:
         mic_sz = 4000  # micrograph size
         M_L_est = ((mgScale * max(mgBigSz)) / (box_sz_Sz / np.sqrt(2))) ** 2
         # Think about it
-        num_of_exp_noise = np.min(
+        num_of_exp_noise = np.max(
             [10 ** 3, int(0.2 * M_L_est / alpha)])  # Test value, should be: 1/num_of_exp_noise~alpha/M_L
 
         dSampleSz = (int(np.floor(mgScale * mgBig.shape[0])), int(np.floor(mgScale * mgBig.shape[1])))
@@ -238,7 +238,7 @@ for mrc_file in files_micro:
                                       output_folder=output_folder_bh)
     plot_and_save(Y, circles=np.flip(Y_peaks_loc[:K_bh, :], axis=1),
                                       obj_sz_down_scaled=obj_sz_down_scaled_plots,
-                                      filename=f'circles_with_bh_{microName}.jpg',
+                                      filename=f'circles_with_bh_{microName}_numObj_{K_bh}_numBase_{num_of_basis}.jpg',
                                       output_folder=output_folder_bh)
     plot_and_save(Y, circles=np.flip(Y_peaks_loc, axis=1), obj_sz_down_scaled=obj_sz_down_scaled,
                                       filename=f'circles_without_bh_{microName}.jpg', output_folder=output_folder_bh)
