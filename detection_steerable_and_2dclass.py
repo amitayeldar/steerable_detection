@@ -35,7 +35,7 @@ l_max_objects = 20  # Maximum order of the Fourier-Bessel basis
 num_of_objects = 30  # Number of objects to use for basis computation
 num_of_noise_patches = 30  # Number of noise patches to use for basis computation
 # compute_basis_from_specific_micrograph
-micrograph_name_for_basis = '098.mrc'  # f None, the basis will be compute from each micrograph separately. with .mrc
+micrograph_name_for_basis = None  # f None, the basis will be compute from each micrograph separately. with .mrc
 # in the end. I
 # noise simulation
 box_sz_Sz = np.min([int(sideLengthAlgorithmL / 2), 100])  # box size for S_z
@@ -44,7 +44,7 @@ num_noise_patch_sim = 15  # number of noise patches to simulate the noise from
 mic_sz = 4000  # micrograph size
 M_L_est = ((mgScale * mic_sz) / (box_sz_Sz / np.sqrt(2))) ** 2
 # Think about it
-num_of_exp_noise = np.min([10 ** 4, int(0.2 * M_L_est / alpha)])  # Test value, should be: 1/num_of_exp_noise~alpha/M_L
+num_of_exp_noise = np.min([10 ** 3, int(0.2 * M_L_est / alpha)])  # Test value, should be: 1/num_of_exp_noise~alpha/M_L
 
 # basis method 0 unsupervised, 1 2dclass
 basis_method = 0
@@ -54,20 +54,19 @@ class_adress_10028 = './class_averages.mrcs'
 use_contamination_datection = 0  # 0 no mask, 1 mask
 
 # Directory paths
-micrograph_directory = './'
-coord_directory = './'
-object_coord_dir = './'
-output_folder_bh = './new'
+micrograph_directory = './data/10028/'
+object_coord_dir = './data/10028'
+output_folder_bh = './results/10028/'
 cont_masks_directory = './'
 os.makedirs(micrograph_directory, exist_ok=True)
 os.makedirs(output_folder_bh, exist_ok=True)
-output_folder_noise_patches_sim = './'
 
+
+
+# process_all_csvs_to_box('./data/particle_coordinates/', './data/particle_coordinates/', 300, 1, 7676)
 
 # Main
 first_run_for_basis = 1  # This is just a flag to implement computing basis from a specific micrograph.
-if use_contamination_datection:
-    cont_masks_directory = '/data/keren/steerable_project/steerable/data/micro_cleaner/'
 
 # Initialize the Fourier-Bessel basis (independent of the micrograph)
 fb_basis_objects = FBBasis2D(size=(obj_sz_down_scaled, obj_sz_down_scaled), ell_max=l_max_objects)
@@ -94,11 +93,11 @@ for mrc_file in files_micro:
         file_path_mask = os.path.join(cont_masks_directory, mrc_file)
     microName = mrc_file.replace(".mrc", "")  # Extract the micrograph name
     with mrcfile.open(file_path, permissive=True) as mrc:
-        mgBig = np.flipud(mrc.data)
+        mgBig = mrc.data
         mgBigSz = mgBig.shape
         mgScale = obj_sz_down_scaled / obj_sz_real
         dSampleSz = (int(np.floor(mgScale * mgBig.shape[0])), int(np.floor(mgScale * mgBig.shape[1])))
-        Y = downsample(mgBig, (dSampleSz[0], dSampleSz[1]))
+        Y = downsample(mgBig, (dSampleSz[1], dSampleSz[0]))
     # contamination detection
     if use_contamination_datection:
         with mrcfile.open(file_path_mask, permissive=True) as mrc_mask:
@@ -122,18 +121,10 @@ for mrc_file in files_micro:
             noise_patches, noise_patches_coor = extract_noise_patches_and_coor_return_min_variance_tf(Y, contamination_mask_binary, obj_sz_down_scaled, num_of_noise_patches)
             num_patches, height, width = noise_patches.shape
             mean_noise_image = np.mean(noise_patches)
-
+            plot_patches_on_micrograph(Y, noise_patches_coor, obj_sz_down_scaled, microName, output_folder=None)
             # Step 2: Compute the steerable basis or use 2dclasses
             # Extract object patches
-            objects_down_scaled = extract_patches_from_coordinates(
-                Y,  # Y (input image)
-                object_coord_dir,  # object_coord_dir
-                microName,  # microName
-                obj_sz_down_scaled,  # patch_size
-                obj_sz_real,  # obj_sz_real
-                obj_sz_down_scaled,  # obj_sz_down_scaled
-                flipud=True,
-                downsample_fn=None)
+            objects_down_scaled = extract_patches_from_any(Y, object_coord_dir, microName, obj_sz_down_scaled, mgScale)
             # Compute the steerable basis
             eigen_vectors_per_ang_lst, mean_noise_per_ang_lst = fourier_bessel_pca_per_angle(noise_patches,
                                                                                              fb_basis_objects)
@@ -150,12 +141,13 @@ for mrc_file in files_micro:
             for n in range(flattened_noise_patches.shape[1]):
                 flattened_noise_patches[:, n] = flattened_noise_patches[:, n] / np.linalg.norm(
                     flattened_noise_patches[:, n])
+            for n in range(flattened_denoised_objects.shape[1]):
                 flattened_denoised_objects[:, n] = flattened_denoised_objects[:, n] / np.linalg.norm(
                     flattened_denoised_objects[:, n])
 
             sorted_basis_vectors_full, num_of_basis, projected_snr_per_dim, basis_idx = sort_steerable_basis_by_obj_then_snr(
                 steerable_basis_vectors, flattened_denoised_objects, flattened_noise_patches,
-                50)
+                100)
             # plt.plot(projected_snr_per_dim)
             # plt.show()
             sorted_steerable_basis_vectors = sorted_basis_vectors_full[:, :num_of_basis + 1]
@@ -190,7 +182,7 @@ for mrc_file in files_micro:
     noise_patches_sim, coor_sim = extract_noise_patches_and_coor_return_min_variance_tf(Y, contamination_mask_binary,
                                                                                         noise_patch_sz_sim,
                                                                                         num_noise_patch_sim)
-    # plot_patches_on_micrograph(Y, coor_sim, noise_patch_sz_sim, microName, output_folder=None)
+    plot_patches_on_micrograph(Y, coor_sim, noise_patch_sz_sim, microName, output_folder=None)
     n_images, img_height, img_width = noise_patches_sim.shape
     flattened_images = noise_patches_sim.reshape(n_images, (img_height) * (img_width))  # Shape: (n_images, n_pixels)
     covariance_matrix = np.cov(flattened_images, rowvar=False)

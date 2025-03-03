@@ -8,54 +8,21 @@ Created on Sun Dec  1 12:50:30 2024
 import numpy as np
 import os.path
 from aspire.image import *
-# from aspire.image import Image as AspireImage
-# from scipy.signal import correlate2d
-from aspire.basis import FBBasis2D
-# import os
-# from scipy.ndimage import rotate
-# from scipy.interpolate import interp1d
-from numpy.fft import fft2, ifft2
-# from scipy.linalg import eigh
-# from scipy.signal import convolve
-# from scipy.signal import convolve2d
-# import scipy.linalg
-# from scipy.signal import fftconvolve
-import matplotlib.pyplot as plt
-from numba import jit, prange
+from aspire.basis import Coef, FBBasis2D
+from aspire.image import Image as AspireImage
+# import matplotlib.pyplot as plt
+# from numba import jit, prange
 import tensorflow as tf
-# import pickle
 from matplotlib.patches import Circle
-# from scipy.spatial.distance import pdist, squareform
-# from scipy.signal import convolve2d
-
-# from scipy.signal import wiener
-# from scipy.linalg import toeplitz
-# import cupy as cp
-# from cupyx.scipy.signal import correlate2d  # GPU-accelerated correlation
-# from cupyx.scipy.linalg import toeplitz  # GPU-accelerated Toeplitz
-# import numpy as np
-# from scipy.signal import convolve2d
-# import torch
-# import torch.nn.functional as F
-# import gc
-# Set device to MPS if available
-#device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
-# import os
 import mrcfile
 import re
-# import numpy as np
-# from sklearn.decomposition import TruncatedSVD
-
-# import cupy as cp
-# import numpy as np
-# from cupyx.scipy.ndimage import convolve
-# import multiprocessing
-
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 import matplotlib.patches as patches
 import logging
+import os
+import pandas as pd
 # Redirect logging to nowhere
 logging.getLogger('aspire').handlers = [logging.FileHandler(os.devnull)]
 
@@ -292,21 +259,141 @@ def extract_patches_from_coordinates(Y, object_coord_dir, microName, patch_size,
     print(f"Extracted and downsampled {len(patches)} valid patches from {coord_path}.")
 
     # Step 5: Visualization
-    # print("[DEBUG] Visualizing downsampled patches on the micrograph...")
-    # plt.figure(figsize=(10, 10))
-    # plt.imshow(Y, cmap='gray', origin='upper')
+    print("[DEBUG] Visualizing downsampled patches on the micrograph...")
+    plt.figure(figsize=(10, 10))
+    plt.imshow(Y, cmap='gray', origin='upper')
 
-    # for x, y in coordinates:
-    #     x_top_left = x - half_patch
-    #     y_top_left = y - half_patch
-    #     rect = plt.Rectangle((x_top_left, y_top_left), patch_size, patch_size,
-    #                          linewidth=1, edgecolor='green', facecolor='none')
-    #     plt.gca().add_patch(rect)
+    for x, y in coordinates:
+        x_top_left = x - half_patch
+        y_top_left = y - half_patch
+        rect = plt.Rectangle((x_top_left, y_top_left), patch_size, patch_size,
+                             linewidth=1, edgecolor='green', facecolor='none')
+        plt.gca().add_patch(rect)
 
-    # plt.title("Debug: Extracted Patch Boundaries")
-    # plt.show()
+    plt.title("Debug: Extracted Patch Boundaries")
+    plt.show()
 
     return np.array(patches)
+
+
+def extract_patches_from_any(Y, object_coord_dir, microName, patch_size, mgScale):
+    """
+    Extract and downsample patches from the image based on coordinates in `.csv`, `.box`, or `.star` files.
+
+    Parameters:
+    Y            : ndarray : The input **downsampled** micrograph.
+    object_coord_dir : str : Directory containing coordinate files.
+    microName    : str     : Base name of the micrograph file.
+    patch_size   : int     : Size of the square patch to extract.
+    mgScale      : float   : Downsampling factor (obj_sz_down_scaled / obj_sz_real).
+
+    Returns:
+    patches : ndarray : Array of extracted patches.
+    """
+
+    # Step 1: Locate the coordinate file
+    coord_path = None
+    file_type = None
+    for ext in ['.csv', '.box', '.star']:
+        potential_file = os.path.join(object_coord_dir, f"{microName}{ext}")
+        if os.path.exists(potential_file):
+            coord_path = potential_file
+            file_type = ext[1:]  # Remove the dot to store file type
+            break
+
+    if not coord_path:
+        print(f"⚠ Skipping {microName}: No coordinate file (.csv, .box, .star) found in {object_coord_dir}")
+        return []
+
+    # Step 2: Load coordinates
+    def load_csv(file_path):
+        """ Load `.csv` file with (x_center, y_center, diameter). """
+        data = np.loadtxt(file_path, delimiter=',', skiprows=1, usecols=(0, 1, 2))  # Read X, Y, Diameter
+        return [(x, y, d, d) for x, y, d in data]  # Treat diameter as width=height
+
+    def load_star(file_path):
+        """ Load `.star` file with (x_center, y_center). """
+        coordinates = []
+        with open(file_path, 'r') as f:
+            inside_loop = False
+            for line in f:
+                if line.startswith('loop_'):
+                    inside_loop = True
+                    continue
+                if inside_loop:
+                    tokens = re.split(r'\s+', line.strip())
+                    if len(tokens) >= 2:
+                        try:
+                            x = float(tokens[0])
+                            y = float(tokens[1])
+                            coordinates.append((x, y, patch_size, patch_size))  # Assume patch_size as width=height
+                        except ValueError:
+                            continue
+        return coordinates
+
+    def load_box(file_path):
+        """ Load `.box` file with top-left (x, y, width, height), convert to center. """
+        boxes = np.loadtxt(file_path, usecols=(0, 1, 2, 3))  # Read x, y, width, height
+        return [(x + w / 2, y + h / 2, w, h) for x, y, w, h in boxes]  # Convert top-left to center
+
+    # Load the correct file type
+    if file_type == "csv":
+        coordinates = load_csv(coord_path)
+    elif file_type == "star":
+        coordinates = load_star(coord_path)
+    else:  # file_type == "box"
+        coordinates = load_box(coord_path)
+
+    # ✅ Step 3: **Scale the coordinates**
+    scaled_coordinates = [(x * mgScale, y * mgScale, w * mgScale, h * mgScale) for x, y, w, h in coordinates]
+
+    # ✅ Step 4: **Flip Y-coordinates ONLY for `.csv` and `.star`, NOT for `.box`**
+    image_height_down_scaled = Y.shape[0]  # Use Y.shape instead of extra parameter
+    if file_type in ["csv", "star"]:
+        flipped_coordinates = [(x, image_height_down_scaled - y, w, h) for x, y, w, h in scaled_coordinates]
+    else:  # If `.box`, don't flip Y
+        flipped_coordinates = scaled_coordinates
+
+    # ✅ Step 5: **Extract patches using top-left corner**
+    half_patch = patch_size / 2
+    patches = []
+
+    for i, (x, y, w, h) in enumerate(flipped_coordinates):
+        # Define patch boundaries
+        row_start = int(y - half_patch)
+        row_end = int(y + half_patch)
+        col_start = int(x - half_patch)
+        col_end = int(x + half_patch)
+
+        # Handle edges by clipping
+        row_start = max(0, row_start)
+        row_end = min(Y.shape[0], row_end)
+        col_start = max(0, col_start)
+        col_end = min(Y.shape[1], col_end)
+
+        # Extract the patch
+        patch = Y[row_start:row_end, col_start:col_end]
+
+        # Validate patch size
+        if patch.shape == (patch_size, patch_size):
+            patches.append(patch)
+
+    print(f"✅ Extracted {len(patches)} valid patches from {coord_path}.")
+
+    # ✅ Step 6: Visualize Patches on Micrograph
+    plt.figure(figsize=(10, 10))
+    plt.imshow(Y, cmap='gray', origin='upper')
+
+    # Draw extracted patches
+    for x, y, w, h in flipped_coordinates:
+        rect = plt.Rectangle((x - w / 2, y - h / 2), w, h, linewidth=1, edgecolor='green', facecolor='none')
+        plt.gca().add_patch(rect)
+
+    plt.title(f"Debug: Extracted Patch Boundaries ({file_type.upper()})")
+    plt.show()
+
+    return np.array(patches)
+
 
 def fourier_bessel_pca_per_angle(noise_patches, fb_basis):
     num_img = noise_patches.shape[0]
@@ -917,3 +1004,91 @@ def plot_and_save(image, circles, obj_sz_down_scaled, filename, output_folder):
     plt.savefig(file_path, pad_inches=0, dpi=100)
     plt.close(fig)
     #plt.show()
+
+def csv_to_box(input_csv, output_box, box_size, mgScale, image_height):
+    """
+    Convert CSV to BOX format for EMAN2, ensuring coordinates align with the micrograph.
+
+    Parameters:
+    input_csv : str : Path to input CSV file
+    output_box : str : Path to output BOX file
+    box_size : int : Box size for particles
+    mgScale : float : Scaling factor for micrograph
+    image_height : int : Height of the flipped micrograph
+    """
+    # Load the CSV file (assuming columns: 'X-Coordinate', 'Y-Coordinate')
+    df = pd.read_csv(input_csv)
+
+    # Open the BOX file for writing
+    with open(output_box, 'w') as f:
+        for _, row in df.iterrows():
+            # Scale and adjust for EMAN2 format
+            x = row['X-Coordinate'] * mgScale
+            y = row['Y-Coordinate'] * mgScale
+
+            # Correct for flip by subtracting from image height
+            y_corrected = (image_height - y) - box_size
+
+            # Calculate top-left corner of the box
+            x_topleft = x - box_size // 2
+            y_topleft = y_corrected - box_size // 2
+
+            # Write to .box file
+            f.write(f"{x_topleft:.0f}\t{y_topleft:.0f}\t{box_size}\t{box_size}\n")
+
+def process_all_csvs_to_box(input_dir, output_dir, box_size, mgScale, image_height):
+    """
+    Process all CSV files in a directory and convert them to BOX files for EMAN2.
+
+    Parameters:
+    input_dir : str : Directory containing input CSV files
+    output_dir : str : Directory to save the output BOX files
+    box_size : int : Box size for particles
+    mgScale : float : Scaling factor for micrograph
+    image_height : int : Height of the flipped micrograph
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    for csv_file in os.listdir(input_dir):
+        if csv_file.endswith('.csv'):
+            microName = os.path.splitext(csv_file)[0]
+            input_csv_path = os.path.join(input_dir, csv_file)
+            output_box_path = os.path.join(output_dir, f"{microName}.box")
+            csv_to_box(input_csv_path, output_box_path, box_size, mgScale, image_height)
+
+
+def plot_image_stack(image_stack):
+    """
+    Plots a stack of 2D images in a grid layout.
+
+    Parameters:
+    - image_stack: A 3D numpy array of images, where the shape is (n, height, width).
+                   n is the number of images, and each image is a 2D array.
+    """
+    n = image_stack.shape[0]  # Number of images
+
+    # Determine grid size (rows, cols) based on the number of images
+    cols = int(np.ceil(np.sqrt(n)))
+    rows = int(np.ceil(n / cols))
+
+    # Create figure and axes for the subplots
+    fig, axes = plt.subplots(rows, cols, figsize=(cols * 3, rows * 3))
+
+    # Flatten the axes array to easily iterate over it
+    axes = axes.flatten()
+
+    # Loop through each image and plot it
+    for i in range(n):
+        axes[i].imshow(image_stack[i], cmap='gray')
+        axes[i].axis('off')  # Turn off axis labels
+        axes[i].set_title(f'Image {i + 1}')
+
+    # Remove any unused subplots if n is not a perfect square
+    for i in range(n, len(axes)):
+        fig.delaxes(axes[i])
+
+    # Adjust the layout to prevent overlap
+    plt.tight_layout()
+
+    # Show the plot
+    plt.show()
+
