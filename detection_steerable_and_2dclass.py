@@ -1,6 +1,29 @@
 # Standard Library Imports
+
+
+# Parameters to change each datasets
 import os
+obj_sz_real = 300
+micrograph_name_for_basis = None  # f None, the basis will be compute from each micrograph separately. with .mrc
+# basis method 0 unsupervised, 1 2dclass
+basis_method = 0
+# contamination detection masks
+use_contamination_datection = 0  # 0 no mask, 1 mask
+# Directory paths
+micrograph_directory = './data/10028/'
+object_coord_dir = './data/10028'
+output_folder_bh = './results/10028/'
+cont_masks_directory = './'
+os.makedirs(micrograph_directory, exist_ok=True)
+os.makedirs(output_folder_bh, exist_ok=True)
+use_gpu = 0  # 0 no gpu, 1 gpu
+
+if use_gpu==0:
+    os.environ["CUDA_VISIBLE_DEVICES"] = "-1"  # Disable GPU before TensorFlow is imported
+    import tensorflow as tf  # Now import TensorFlow
+
 import math
+import tensorflow as tf  # Now import TensorFlow
 # from aspire.basis import Coef, FBBasis2D
 # from aspire.image import Image as AspireImage
 from scipy.sparse.linalg import eigsh
@@ -20,8 +43,8 @@ alpha = 0.05  #BH
 delta = 1  #Centering
 
 # Object
-obj_sz_reported = 360
-obj_sz_real = 300
+
+
 obj_sz_down_scaled = 64
 mgScale = obj_sz_down_scaled / obj_sz_real
 obj_sz_plots = obj_sz_real
@@ -35,31 +58,18 @@ l_max_objects = 20  # Maximum order of the Fourier-Bessel basis
 num_of_objects = 30  # Number of objects to use for basis computation
 num_of_noise_patches = 30  # Number of noise patches to use for basis computation
 # compute_basis_from_specific_micrograph
-micrograph_name_for_basis = None  # f None, the basis will be compute from each micrograph separately. with .mrc
+
 # in the end. I
 # noise simulation
 box_sz_Sz = np.min([int(sideLengthAlgorithmL / 2), 100])  # box size for S_z
 noise_patch_sz_sim = box_sz_Sz + obj_sz_down_scaled  # box_sz needed due to convulution of S_z
 num_noise_patch_sim = 15  # number of noise patches to simulate the noise from
-mic_sz = 4000  # micrograph size
-M_L_est = ((mgScale * mic_sz) / (box_sz_Sz / np.sqrt(2))) ** 2
-# Think about it
-num_of_exp_noise = np.min([10 ** 3, int(0.2 * M_L_est / alpha)])  # Test value, should be: 1/num_of_exp_noise~alpha/M_L
 
-# basis method 0 unsupervised, 1 2dclass
-basis_method = 0
+
+
 class_adress_10028 = './class_averages.mrcs'
 
-# contamination detection masks
-use_contamination_datection = 0  # 0 no mask, 1 mask
 
-# Directory paths
-micrograph_directory = './data/10028/'
-object_coord_dir = './data/10028'
-output_folder_bh = './results/10028/'
-cont_masks_directory = './'
-os.makedirs(micrograph_directory, exist_ok=True)
-os.makedirs(output_folder_bh, exist_ok=True)
 
 
 
@@ -93,9 +103,16 @@ for mrc_file in files_micro:
         file_path_mask = os.path.join(cont_masks_directory, mrc_file)
     microName = mrc_file.replace(".mrc", "")  # Extract the micrograph name
     with mrcfile.open(file_path, permissive=True) as mrc:
+
         mgBig = mrc.data
         mgBigSz = mgBig.shape
         mgScale = obj_sz_down_scaled / obj_sz_real
+        mic_sz = 4000  # micrograph size
+        M_L_est = ((mgScale * max(mgBigSz)) / (box_sz_Sz / np.sqrt(2))) ** 2
+        # Think about it
+        num_of_exp_noise = np.min(
+            [10 ** 3, int(0.2 * M_L_est / alpha)])  # Test value, should be: 1/num_of_exp_noise~alpha/M_L
+
         dSampleSz = (int(np.floor(mgScale * mgBig.shape[0])), int(np.floor(mgScale * mgBig.shape[1])))
         Y = downsample(mgBig, (dSampleSz[1], dSampleSz[0]))
     # contamination detection
@@ -109,7 +126,7 @@ for mrc_file in files_micro:
             contamination_mask_binary[contamination_mask_binary < threshold] = 0
             contamination_mask_binary[contamination_mask_binary >= threshold] = 1
     else:
-        contamination_mask_binary = np.ones(Y.shape)
+        contamination_mask_binary = np.zeros(Y.shape)
 
 
     if basis_method == 0:
@@ -124,7 +141,7 @@ for mrc_file in files_micro:
             plot_patches_on_micrograph(Y, noise_patches_coor, obj_sz_down_scaled, microName, output_folder=None)
             # Step 2: Compute the steerable basis or use 2dclasses
             # Extract object patches
-            objects_down_scaled = extract_patches_from_any(Y, object_coord_dir, microName, obj_sz_down_scaled, mgScale)
+            objects_down_scaled = extract_patches_from_any(Y, object_coord_dir, microName, obj_sz_down_scaled, mgScale,contamination_mask_binary)
             # Compute the steerable basis
             eigen_vectors_per_ang_lst, mean_noise_per_ang_lst = fourier_bessel_pca_per_angle(noise_patches,
                                                                                              fb_basis_objects)
@@ -161,7 +178,7 @@ for mrc_file in files_micro:
             with mrcfile.open(class_adress_10028, permissive=True) as class_2d:
                 class_2d_img = class_2d.data
                 class_2d_img = class_2d_img.transpose(1, 2, 0)
-                mgScale = obj_sz_down_scaled / obj_sz_reported
+                mgScale = obj_sz_down_scaled / class_2d_img.shape[0]
                 dSampleSz = (
                     int(np.floor(mgScale * class_2d_img.shape[0])), int(np.floor(mgScale * class_2d_img.shape[1])))
                 # Y = AspireImage(mgBig).downsample(dSampleSz[0]).asnumpy()[0]
@@ -199,11 +216,11 @@ for mrc_file in files_micro:
     # Step 4: Compute Peaks
     centerd_Y = Y - np.mean(noise_patches_sim)
     Y_peaks, Y_peaks_loc, S = peak_algorithm_cont_mask_tf(
-        centerd_Y, sorted_basis_images, np.floor(sideLengthAlgorithmL),
+        centerd_Y, sorted_basis_images, np.floor(sideLengthAlgorithmL),contamination_mask_binary,
         obj_sz_down_scaled=obj_sz_down_scaled)
-    # plt.plot(z_max)
-    # plt.plot(Y_peaks)
-    # plt.show()
+    plt.plot(z_max)
+    plt.plot(Y_peaks)
+    plt.show()
 
     # Step 5: BH algorithm
     test_val = test_function_real_data(z_max, Y_peaks)

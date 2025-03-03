@@ -125,15 +125,29 @@ def extract_noise_patches_and_coor_return_min_variance_tf(noise_img_scaled, cont
         i_row, i_col = np.unravel_index(np.argmin(Y_var), Y_var.shape)  # Index of the minimum variance value
         # Extract patch, ensuring it remains box_sz x box_sz
         if box_sz % 2 == 0:
-            patch = noise_img_scaled[
+            if np.any(contamination_mask[
+                max(0, i_row - half_box_sz): min(i_row + half_box_sz, noise_img_scaled.shape[0]),
+                max(0, i_col - half_box_sz): min(i_col + half_box_sz, noise_img_scaled.shape[1])
+            ] == 1):
+                Y_var[max(0, i_row - half_box_sz): min(i_row + half_box_sz, noise_img_scaled.shape[0]),
+                max(0, i_col - half_box_sz): min(i_col + half_box_sz, noise_img_scaled.shape[1])] = np.inf
+                continue
+            else:
+                patch = noise_img_scaled[
                     max(0, i_row - half_box_sz): min(i_row + half_box_sz, noise_img_scaled.shape[0]),
-                    max(0, i_col - half_box_sz): min(i_col + half_box_sz, noise_img_scaled.shape[1])
-                    ]
+                    max(0, i_col - half_box_sz): min(i_col + half_box_sz, noise_img_scaled.shape[1])]
         else:
-            patch = noise_img_scaled[
+            if np.any(contamination_mask[
+                max(0, i_row - half_box_sz): min(i_row + half_box_sz - 1, noise_img_scaled.shape[0]),
+                max(0, i_col - half_box_sz): min(i_col + half_box_sz - 1, noise_img_scaled.shape[1])
+            ] == 1):
+                Y_var[max(0, i_row - half_box_sz): min(i_row + half_box_sz - 1, noise_img_scaled.shape[0]),
+                max(0, i_col - half_box_sz): min(i_col + half_box_sz - 1, noise_img_scaled.shape[1])] = np.inf
+                continue
+            else:
+                patch = noise_img_scaled[
                     max(0, i_row - half_box_sz): min(i_row + half_box_sz - 1, noise_img_scaled.shape[0]),
-                    max(0, i_col - half_box_sz): min(i_col + half_box_sz - 1, noise_img_scaled.shape[1])
-                    ]
+                    max(0, i_col - half_box_sz): min(i_col + half_box_sz - 1, noise_img_scaled.shape[1])]
 
         # Skip invalid or out-of-bound patches
         if patch.shape != (box_sz, box_sz):
@@ -276,7 +290,7 @@ def extract_patches_from_coordinates(Y, object_coord_dir, microName, patch_size,
     return np.array(patches)
 
 
-def extract_patches_from_any(Y, object_coord_dir, microName, patch_size, mgScale):
+def extract_patches_from_any(Y, object_coord_dir, microName, patch_size, mgScale,contamination_mask):
     """
     Extract and downsample patches from the image based on coordinates in `.csv`, `.box`, or `.star` files.
 
@@ -372,7 +386,10 @@ def extract_patches_from_any(Y, object_coord_dir, microName, patch_size, mgScale
         col_end = min(Y.shape[1], col_end)
 
         # Extract the patch
-        patch = Y[row_start:row_end, col_start:col_end]
+        if np.any(contamination_mask[row_start:row_end, col_start:col_end] == 1):
+            continue
+        else:
+            patch = Y[row_start:row_end, col_start:col_end]
 
         # Validate patch size
         if patch.shape == (patch_size, patch_size):
