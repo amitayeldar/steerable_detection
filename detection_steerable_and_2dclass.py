@@ -107,7 +107,6 @@ for mrc_file in files_micro:
         mgBig = mrc.data
         mgBigSz = mgBig.shape
         mgScale = obj_sz_down_scaled / obj_sz_real
-        mic_sz = 4000  # micrograph size
         M_L_est = ((mgScale * max(mgBigSz)) / (box_sz_Sz / np.sqrt(2))) ** 2
         # Think about it
         num_of_exp_noise = np.max(
