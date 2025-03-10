@@ -552,16 +552,19 @@ def compute_the_steerable_images_alpha(objects, obj_sz, fb_basis, eigen_vectors_
             projected_obj[n] = np.sum(object_coeff_eigen_noise[n+1:]**2)
             projected_noise[n] = np.sum(eigen_values_per_ang_lst[0][n + 1:])
         projected_diff = projected_obj - projected_noise
-        first_index = np.argmax(projected_diff > 0) if np.any(projected_diff > 0) else -1
-        first_index = np.max([first_index, 3])
+        start_index = 0
+        first_index = np.argmax(projected_diff[start_index:] > 0) if np.any(projected_diff[start_index:] > 0) else -1
+        first_index = start_index + first_index
         if first_index == -1:
-            print("problem")
+            v_0._data[0, :fb_basis.k_max[0]] = 0
         else:
             k = np.argmax(projected_diff[first_index:]) + first_index
-            # print(k, 0)
-        Q = Q[:, :k+1]
-        v_0._data[0, :fb_basis.k_max[0]] = v_0._data[0, :fb_basis.k_max[0]] - Q @ (
+            Q = Q[:, :k + 1]
+            v_0._data[0, :fb_basis.k_max[0]] = v_0._data[0, :fb_basis.k_max[0]] - Q @ (
                     Q.T @ v_0._data[0, :fb_basis.k_max[0]])
+            # print(k, 0)
+
+
         img_fb_coeff_denoise._data[0, :fb_basis.k_max[0]] = v_0._data[0, :fb_basis.k_max[0]]
         v_0_img = fb_basis.evaluate(v_0).asnumpy()[0]
         steerable_euclidian_l[:, :, 0, n_img] = fb_basis.evaluate(v_0)
@@ -585,19 +588,22 @@ def compute_the_steerable_images_alpha(objects, obj_sz, fb_basis, eigen_vectors_
                 projected_obj[n] = np.sum(object_coeff_eigen_noise[n + 1:] ** 2)
                 projected_noise[n] = np.sum(eigen_values_per_ang_lst[l_idx][n + 1:])
             projected_diff = projected_obj - projected_noise
-            first_index = np.argmax(projected_diff > 0) if np.any(projected_diff > 0) else -1
-            first_index = np.max([first_index, 3])
+            start_index = 0
+            first_index = np.argmax(projected_diff[start_index:] > 0) if np.any(projected_diff[start_index:] > 0) else -1
+            first_index = start_index + first_index
             if first_index == -1:
-                print("problem")
+                vcos._data[0, coeff_k_index_start:coeff_k_index_end_cos] = 0
             else:
                 k = np.argmax(projected_diff[first_index:])+first_index
-                # print(k,l_idx)
-
-            Q = Q[:, :k + 1]
-            vcos._data[0, coeff_k_index_start:coeff_k_index_end_cos] = vcos._data[0,
-                                                                       coeff_k_index_start:coeff_k_index_end_cos] - Q @ (
+                Q = Q[:, :k + 1]
+                vcos._data[0, coeff_k_index_start:coeff_k_index_end_cos] = vcos._data[0,
+                                                                           coeff_k_index_start:coeff_k_index_end_cos] - Q @ (
                                                                                    Q.T @ vcos._data[0,
                                                                                          coeff_k_index_start:coeff_k_index_end_cos])
+                # print(k,l_idx)
+
+
+
             img_fb_coeff_denoise._data[0, coeff_k_index_start:coeff_k_index_end_cos] = vcos._data[0,
                                                                                        coeff_k_index_start:coeff_k_index_end_cos]
             vsin = img_fb_coeff.copy()
@@ -614,18 +620,21 @@ def compute_the_steerable_images_alpha(objects, obj_sz, fb_basis, eigen_vectors_
                 projected_obj[n] = np.sum(object_coeff_eigen_noise[n + 1:] ** 2)
                 projected_noise[n] = np.sum(eigen_values_per_ang_lst[l_idx][n + 1:])
             projected_diff = projected_obj - projected_noise
-            first_index = np.argmax(projected_diff > 0) if np.any(projected_diff > 0) else -1
-            first_index = np.max([first_index, 3])
+            start_index = 0
+            first_index = np.argmax(projected_diff[start_index:] > 0) if np.any(projected_diff[start_index:] > 0) else -1
+            first_index = start_index + first_index
             if first_index == -1:
-                print("problem")
+                vsin._data[0, coeff_k_index_end_cos:coeff_k_index_end_sin] = 0
             else:
                 k = np.argmax(projected_diff[first_index:]) + first_index
-                # print(k, l_idx)
-            Q = Q[:, :k + 1]
-            vsin._data[0, coeff_k_index_end_cos:coeff_k_index_end_sin] = vsin._data[0,
-                                                                         coeff_k_index_end_cos:coeff_k_index_end_sin] - Q @ (
+                Q = Q[:, :k + 1]
+                vsin._data[0, coeff_k_index_end_cos:coeff_k_index_end_sin] = vsin._data[0,
+                                                                             coeff_k_index_end_cos:coeff_k_index_end_sin] - Q @ (
                                                                                      Q.T @ vsin._data[0,
                                                                                            coeff_k_index_end_cos:coeff_k_index_end_sin])
+                # print(k, l_idx)
+
+
             img_fb_coeff_denoise._data[0, coeff_k_index_end_cos:coeff_k_index_end_sin] = vsin._data[0,
                                                                                          coeff_k_index_end_cos:coeff_k_index_end_sin]
 
