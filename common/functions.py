@@ -5,6 +5,11 @@ Created on Sun Dec  1 12:50:30 2024
 
 @author: Amitay Eldar and Keren Mor
 """
+# import os
+# use_gpu=0
+# if use_gpu==0:
+#     os.environ["CUDA_VISIBLE_DEVICES"] = "-1"  # Disable GPU before TensorFlow is imported
+#     import tensorflow as tf  # Now import TensorFlow
 import numpy as np
 import os.path
 from aspire.image import *
@@ -462,7 +467,177 @@ def fourier_bessel_pca_per_angle(noise_patches, fb_basis):
                 k = np.argmax(l2_ratios >= 0.9) + 1
                 eigen_vectors_per_ang_lst.append(eigen_vectors_per_angle[:, :k])
     return eigen_vectors_per_ang_lst, mean_noise_per_ang_lst
+def fourier_bessel_pca_per_angle_alpha(noise_patches, fb_basis):
+    num_img = noise_patches.shape[0]
+    eigen_vectors_per_ang_lst = []
+    eigen_values_per_ang_lst = []
+    mean_noise_per_ang_lst = []
+    # get coeff_per_angular
+    coeff_per_img = []
+    coeff_per_angle = []
+    for n_img in range(num_img):
+        img = Image(noise_patches[n_img].astype(np.float32))
+        coeff_per_img.append(fb_basis.evaluate_t(img))
 
+    for n_ang in range(fb_basis.ell_max + 1):
+        if n_ang == 0:
+            s = 0
+            e = fb_basis.k_max[0]
+            coeff_arr = np.zeros((fb_basis.k_max[n_ang], num_img))
+            for n_img in range(num_img):
+                coeff_tmp = coeff_per_img[n_img]._data
+                coeff_arr[:, n_img] = coeff_tmp[0][s:e]
+            mean_noise_per_ang_lst.append(np.mean(coeff_arr, axis=1))
+            cov_per_angle = np.cov(coeff_arr, bias=True)
+            eigen_values_per_angle, eigen_vectors_per_angle = np.linalg.eigh(cov_per_angle)
+            sorted_indices = np.argsort(eigen_values_per_angle)[::-1]
+            eigen_values_per_angle = eigen_values_per_angle[sorted_indices]
+            eigen_vectors_per_angle = eigen_vectors_per_angle[:, sorted_indices]
+            # check pca
+            # mean_norm = 0
+            # for n in range(coeff_arr.shape[1]):
+            #     mean_norm += np.linalg.norm(coeff_arr[:,n] - np.mean(coeff_arr, axis=1), axis=0)**2
+            # mean_norm = mean_norm/coeff_arr.shape[1]
+            total_norm = np.sum(eigen_values_per_angle)
+            # print((total_norm-mean_norm)/mean_norm)
+            cumulative_norm = np.cumsum(eigen_values_per_angle)
+            l2_ratios = cumulative_norm / total_norm
+            k = np.argmax(l2_ratios >= 0.999) + 1
+            eigen_vectors_per_ang_lst.append(eigen_vectors_per_angle[:, :k])
+            eigen_values_per_ang_lst.append(eigen_values_per_angle)
+        else:
+            for i in range(2):
+                coeff_arr = np.zeros((fb_basis.k_max[n_ang], num_img))
+                s = e
+                e += fb_basis.k_max[n_ang]
+                for n_img in range(num_img):
+                    coeff_tmp = coeff_per_img[n_img]._data
+                    coeff_arr[:, n_img] = coeff_tmp[0][s:e]
+                mean_noise_per_ang_lst.append(np.mean(coeff_arr, axis=1))
+                cov_per_angle = np.cov(coeff_arr, bias=True)
+                eigen_values_per_angle, eigen_vectors_per_angle = np.linalg.eigh(cov_per_angle)
+                sorted_indices = np.argsort(eigen_values_per_angle)[::-1]
+                eigen_values_per_angle = eigen_values_per_angle[sorted_indices]
+                eigen_vectors_per_angle = eigen_vectors_per_angle[:, sorted_indices]
+                mean_norm = 0
+                for n in range(coeff_arr.shape[1]):
+                    mean_norm += np.linalg.norm(coeff_arr[:, n] - np.mean(coeff_arr, axis=1)) ** 2
+                mean_norm = mean_norm / coeff_arr.shape[1]
+                total_norm = np.sum(eigen_values_per_angle)
+                print((total_norm - mean_norm) / mean_norm)
+                cumulative_norm = np.cumsum(eigen_values_per_angle)
+                l2_ratios = cumulative_norm / total_norm
+                k = np.argmax(l2_ratios >= 0.999) + 1
+                eigen_vectors_per_ang_lst.append(eigen_vectors_per_angle[:, :k])
+                eigen_values_per_ang_lst.append(eigen_values_per_angle)
+    return eigen_vectors_per_ang_lst, eigen_values_per_ang_lst, mean_noise_per_ang_lst
+def compute_the_steerable_images_alpha(objects, obj_sz, fb_basis, eigen_vectors_per_ang_lst, eigen_values_per_ang_lst, mean_noise_per_ang_lst):
+    # compute the radial Fourier component to each class average
+    # get the coefficients of the class averages in the FB basis
+    steerable_euclidian_l = np.zeros((obj_sz, obj_sz, 1 + 2 * (fb_basis.ell_max), objects.shape[0]))
+    denoised_images = np.zeros(objects.shape)
+    for n_img in range(objects.shape[0]):
+        img = Image(objects[n_img].astype(np.float32))
+        img_fb_coeff = fb_basis.evaluate_t(img)
+        img_fb_coeff_denoise = img_fb_coeff.copy()
+        v_0 = img_fb_coeff.copy()
+        v_0._data[0, fb_basis.k_max[0]:] = 0
+        v_0._data[0, :fb_basis.k_max[0]] = v_0._data[0, :fb_basis.k_max[0]] - mean_noise_per_ang_lst[0]
+        # denoise the image by removing the noise component
+        Q = eigen_vectors_per_ang_lst[0]
+        object_coeff_eigen_noise = Q.T @ v_0._data[0, :fb_basis.k_max[0]]
+        projected_obj = np.zeros(object_coeff_eigen_noise.shape)
+        projected_noise = np.zeros(object_coeff_eigen_noise.shape)
+        for n in range(object_coeff_eigen_noise.shape[0]-1):
+            projected_obj[n] = np.sum(object_coeff_eigen_noise[n+1:]**2)
+            projected_noise[n] = np.sum(eigen_values_per_ang_lst[0][n + 1:])
+        projected_diff = projected_obj - projected_noise
+        first_index = np.argmax(projected_diff > 0) if np.any(projected_diff > 0) else -1
+        first_index = np.max([first_index, 3])
+        if first_index == -1:
+            print("problem")
+        else:
+            k = np.argmax(projected_diff[first_index:]) + first_index
+            # print(k, 0)
+        Q = Q[:, :k+1]
+        v_0._data[0, :fb_basis.k_max[0]] = v_0._data[0, :fb_basis.k_max[0]] - Q @ (
+                    Q.T @ v_0._data[0, :fb_basis.k_max[0]])
+        img_fb_coeff_denoise._data[0, :fb_basis.k_max[0]] = v_0._data[0, :fb_basis.k_max[0]]
+        v_0_img = fb_basis.evaluate(v_0).asnumpy()[0]
+        steerable_euclidian_l[:, :, 0, n_img] = fb_basis.evaluate(v_0)
+        coeff_k_index_start = fb_basis.k_max[0]
+        for m in range(1, fb_basis.ell_max + 1):
+            l_idx = 2 * m - 1
+            k_idx = fb_basis.k_max[m]
+            coeff_k_index_end_cos = coeff_k_index_start + k_idx
+            coeff_k_index_end_sin = coeff_k_index_end_cos + k_idx
+            vcos = img_fb_coeff.copy()
+            vcos._data[0, :coeff_k_index_start] = 0
+            vcos._data[0, coeff_k_index_end_cos:] = 0
+            # denoise the image by removing the noise component
+            vcos._data[0, coeff_k_index_start:coeff_k_index_end_cos] = vcos._data[0,
+                                                                       coeff_k_index_start:coeff_k_index_end_cos] - mean_noise_per_ang_lst[l_idx]
+            Q = eigen_vectors_per_ang_lst[l_idx]
+            object_coeff_eigen_noise = Q.T @ vcos._data[0, coeff_k_index_start:coeff_k_index_end_cos]
+            projected_obj = np.zeros(object_coeff_eigen_noise.shape)
+            projected_noise = np.zeros(object_coeff_eigen_noise.shape)
+            for n in range(object_coeff_eigen_noise.shape[0] - 1):
+                projected_obj[n] = np.sum(object_coeff_eigen_noise[n + 1:] ** 2)
+                projected_noise[n] = np.sum(eigen_values_per_ang_lst[l_idx][n + 1:])
+            projected_diff = projected_obj - projected_noise
+            first_index = np.argmax(projected_diff > 0) if np.any(projected_diff > 0) else -1
+            first_index = np.max([first_index, 3])
+            if first_index == -1:
+                print("problem")
+            else:
+                k = np.argmax(projected_diff[first_index:])+first_index
+                # print(k,l_idx)
+
+            Q = Q[:, :k + 1]
+            vcos._data[0, coeff_k_index_start:coeff_k_index_end_cos] = vcos._data[0,
+                                                                       coeff_k_index_start:coeff_k_index_end_cos] - Q @ (
+                                                                                   Q.T @ vcos._data[0,
+                                                                                         coeff_k_index_start:coeff_k_index_end_cos])
+            img_fb_coeff_denoise._data[0, coeff_k_index_start:coeff_k_index_end_cos] = vcos._data[0,
+                                                                                       coeff_k_index_start:coeff_k_index_end_cos]
+            vsin = img_fb_coeff.copy()
+            vsin._data[0, :coeff_k_index_end_cos] = 0
+            vsin._data[0, coeff_k_index_end_sin:] = 0
+            # denoise the image by removing the noise component
+            vsin._data[0, coeff_k_index_end_cos:coeff_k_index_end_sin] = vsin._data[0,
+                                                                         coeff_k_index_end_cos:coeff_k_index_end_sin] - mean_noise_per_ang_lst[l_idx + 1]
+            Q = eigen_vectors_per_ang_lst[l_idx + 1]
+            object_coeff_eigen_noise = Q.T @ vsin._data[0, coeff_k_index_end_cos:coeff_k_index_end_sin]
+            projected_obj = np.zeros(object_coeff_eigen_noise.shape)
+            projected_noise = np.zeros(object_coeff_eigen_noise.shape)
+            for n in range(object_coeff_eigen_noise.shape[0] - 1):
+                projected_obj[n] = np.sum(object_coeff_eigen_noise[n + 1:] ** 2)
+                projected_noise[n] = np.sum(eigen_values_per_ang_lst[l_idx][n + 1:])
+            projected_diff = projected_obj - projected_noise
+            first_index = np.argmax(projected_diff > 0) if np.any(projected_diff > 0) else -1
+            first_index = np.max([first_index, 3])
+            if first_index == -1:
+                print("problem")
+            else:
+                k = np.argmax(projected_diff[first_index:]) + first_index
+                # print(k, l_idx)
+            Q = Q[:, :k + 1]
+            vsin._data[0, coeff_k_index_end_cos:coeff_k_index_end_sin] = vsin._data[0,
+                                                                         coeff_k_index_end_cos:coeff_k_index_end_sin] - Q @ (
+                                                                                     Q.T @ vsin._data[0,
+                                                                                           coeff_k_index_end_cos:coeff_k_index_end_sin])
+            img_fb_coeff_denoise._data[0, coeff_k_index_end_cos:coeff_k_index_end_sin] = vsin._data[0,
+                                                                                         coeff_k_index_end_cos:coeff_k_index_end_sin]
+
+            vcos_img = fb_basis.evaluate(vcos).asnumpy()[0]
+            vsin_img = fb_basis.evaluate(vsin).asnumpy()[0]
+            steerable_euclidian_l[:, :, l_idx, n_img] = vcos_img
+            steerable_euclidian_l[:, :, l_idx + 1, n_img] = vsin_img
+            # steerable_euclidian_l[:,:,l_idx,n_img] = vcos_img + 1j*vsin_img
+            # steerable_euclidian_l[:, :, l_idx+1, n_img] = vcos_img - 1j * vsin_img
+            coeff_k_index_start = coeff_k_index_end_sin
+        denoised_images[n_img, :, :] = fb_basis.evaluate(img_fb_coeff_denoise).asnumpy()[0]
+    return steerable_euclidian_l, denoised_images
 def compute_the_steerable_images(objects, obj_sz, fb_basis, eigen_vectors_per_ang_lst, mean_noise_per_ang_lst):
     # compute the radial Fourier component to each class average
     # get the coefficients of the class averages in the FB basis

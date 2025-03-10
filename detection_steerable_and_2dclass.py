@@ -3,20 +3,20 @@
 
 # Parameters to change each datasets
 import os
-obj_sz_real = 300
+obj_sz_real = 120
 micrograph_name_for_basis = None  # f None, the basis will be compute from each micrograph separately. with .mrc
 # basis method 0 unsupervised, 1 2dclass
 basis_method = 0
 # contamination detection masks
-use_contamination_datection = 0  # 0 no mask, 1 mask
+use_contamination_datection = 1  # 0 no mask, 1 mask
 # Directory paths
-micrograph_directory = './data/10028/'
-object_coord_dir = './data/10028'
-output_folder_bh = './results/10028/'
-cont_masks_directory = './'
+micrograph_directory = './data/10017/micrographs'
+object_coord_dir = './data/10017/particles'
+output_folder_bh = './results/10017/'
+cont_masks_directory = './data/10017/masks'
 os.makedirs(micrograph_directory, exist_ok=True)
 os.makedirs(output_folder_bh, exist_ok=True)
-use_gpu = 0  # 0 no gpu, 1 gpu
+use_gpu = 1  # 0 no gpu, 1 gpu
 
 if use_gpu==0:
     os.environ["CUDA_VISIBLE_DEVICES"] = "-1"  # Disable GPU before TensorFlow is imported
@@ -45,7 +45,7 @@ delta = 1  #Centering
 # Object
 
 
-obj_sz_down_scaled = 64
+obj_sz_down_scaled = 110
 mgScale = obj_sz_down_scaled / obj_sz_real
 obj_sz_plots = obj_sz_real
 obj_sz_down_scaled_plots = obj_sz_plots * mgScale
@@ -56,7 +56,7 @@ sideLengthAlgorithmL = golden_ratio * sideLengthAlgorithm
 # Steerable basis paramerters
 l_max_objects = 20  # Maximum order of the Fourier-Bessel basis
 num_of_objects = 30  # Number of objects to use for basis computation
-num_of_noise_patches = 30  # Number of noise patches to use for basis computation
+num_of_noise_patches = 50  # Number of noise patches to use for basis computation
 # compute_basis_from_specific_micrograph
 
 # in the end. I
@@ -150,13 +150,14 @@ for mrc_file in files_micro:
             # Extract object patches
             objects_down_scaled = extract_patches_from_any(Y, object_coord_dir, microName, obj_sz_down_scaled, mgScale,contamination_mask_binary)
             # Compute the steerable basis
-            eigen_vectors_per_ang_lst, mean_noise_per_ang_lst = fourier_bessel_pca_per_angle(noise_patches,
+            eigen_vectors_per_ang_lst, eigen_values_per_ang_lst, mean_noise_per_ang_lst = fourier_bessel_pca_per_angle_alpha(noise_patches,
                                                                                              fb_basis_objects)
-            steerable_euclidian_l_new_objects, denoised_objects = compute_the_steerable_images(
+            steerable_euclidian_l_new_objects, denoised_objects = compute_the_steerable_images_alpha(
                 objects_down_scaled[:num_of_objects, :, :],
                 obj_sz_down_scaled,
                 fb_basis_objects,
                 eigen_vectors_per_ang_lst,
+                eigen_values_per_ang_lst,
                 mean_noise_per_ang_lst)
             steerable_basis_vectors = compute_the_steerable_basis(steerable_euclidian_l_new_objects)
 
@@ -213,10 +214,12 @@ for mrc_file in files_micro:
     eigenvalues, eigenvectors = eigsh(covariance_matrix, k=n_images - 1, which='LM')  # 'LM' -> Largest Magnitude
     # plt.plot(eigenvalues)
     # plt.show()
+    num_of_exp_noise = 100
     Lambda_sqrt = np.diag(np.sqrt(eigenvalues))
     Z = np.random.randn(len(eigenvalues), num_of_exp_noise)
     noise_vec_sim = (eigenvectors @ Lambda_sqrt) @ Z
     # Simulate S_z from noise patches
+
     S_z_tf = projected_noise_simulation_from_noise_patches_tf(noise_vec_sim, sorted_basis_images, num_of_exp_noise)
     z_max = np.max(S_z_tf, axis=(0, 1)).reshape(-1, 1)
 
