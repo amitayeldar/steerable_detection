@@ -872,7 +872,7 @@ def plot_patches_on_micrograph(Y, noise_patches_coor, patch_size, microName, out
     else:
         plt.show()
 
-def projected_noise_simulation_from_noise_patches_tf(noise_samples, basis, num_of_exp_noise):
+def projected_noise_simulation_from_noise_patches_tf(noise_samples, basis):
     """
     Simulates projected noise using given noise samples and basis functions.
 
@@ -884,6 +884,7 @@ def projected_noise_simulation_from_noise_patches_tf(noise_samples, basis, num_o
     Returns:
     S_z : Simulated noise projections.
     """
+    num_of_exp_noise = noise_samples.shape[1]
     noise_samples = noise_samples.astype(np.float32)
     basis = basis.astype(np.float32)
 
