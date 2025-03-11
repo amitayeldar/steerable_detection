@@ -214,7 +214,6 @@ for mrc_file in files_micro:
     eigenvalues, eigenvectors = eigsh(covariance_matrix, k=n_images - 1, which='LM')  # 'LM' -> Largest Magnitude
     # plt.plot(eigenvalues)
     # plt.show()
-    num_of_exp_noise = 100
     Lambda_sqrt = np.diag(np.sqrt(eigenvalues))
     Z = np.random.randn(len(eigenvalues), num_of_exp_noise)
     noise_vec_sim = (eigenvectors @ Lambda_sqrt) @ Z
