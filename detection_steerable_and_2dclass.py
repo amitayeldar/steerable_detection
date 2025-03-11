@@ -45,7 +45,7 @@ delta = 1  #Centering
 # Object
 
 
-obj_sz_down_scaled = 110
+obj_sz_down_scaled = 64
 mgScale = obj_sz_down_scaled / obj_sz_real
 obj_sz_plots = obj_sz_real
 obj_sz_down_scaled_plots = obj_sz_plots * mgScale
