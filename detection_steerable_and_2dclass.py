@@ -16,7 +16,7 @@ output_folder_bh = './results/10017/'
 cont_masks_directory = './data/10017/masks'
 os.makedirs(micrograph_directory, exist_ok=True)
 os.makedirs(output_folder_bh, exist_ok=True)
-use_gpu = 1  # 0 no gpu, 1 gpu
+use_gpu = 0  # 0 no gpu, 1 gpu
 
 if use_gpu==0:
     os.environ["CUDA_VISIBLE_DEVICES"] = "-1"  # Disable GPU before TensorFlow is imported
@@ -63,6 +63,7 @@ num_of_noise_patches = 50  # Number of noise patches to use for basis computatio
 # noise simulation
 box_sz_Sz = np.min([int(sideLengthAlgorithmL / 2), 100])  # box size for S_z
 noise_patch_sz_sim = box_sz_Sz + obj_sz_down_scaled  # box_sz needed due to convulution of S_z
+# noise_patch_sz_sim = 64
 num_noise_patch_sim = 15  # number of noise patches to simulate the noise from
 
 
@@ -103,7 +104,6 @@ for mrc_file in files_micro:
         file_path_mask = os.path.join(cont_masks_directory, mrc_file)
     microName = mrc_file.replace(".mrc", "")  # Extract the micrograph name
     with mrcfile.open(file_path, permissive=True) as mrc:
-
         mgBig = mrc.data
         mgBigSz = mgBig.shape
         mgScale = obj_sz_down_scaled / obj_sz_real
@@ -111,7 +111,7 @@ for mrc_file in files_micro:
         # Think about it
         num_of_exp_noise = np.max(
             [10 ** 3, int(0.2 * M_L_est / alpha)])  # Test value, should be: 1/num_of_exp_noise~alpha/M_L
-
+        num_of_exp_noise = 10**3
         dSampleSz = (int(np.floor(mgScale * mgBig.shape[0])), int(np.floor(mgScale * mgBig.shape[1])))
         Y = downsample(mgBig, (dSampleSz[1], dSampleSz[0]))
     # contamination detection
@@ -210,49 +210,56 @@ for mrc_file in files_micro:
     plot_patches_on_micrograph(Y, coor_sim, noise_patch_sz_sim, microName, output_folder=None)
     n_images, img_height, img_width = noise_patches_sim.shape
     flattened_images = noise_patches_sim.reshape(n_images, (img_height) * (img_width))  # Shape: (n_images, n_pixels)
-    covariance_matrix = np.cov(flattened_images, rowvar=False)
+    covariance_matrix = np.cov(flattened_images, rowvar=False, bias=True)
     eigenvalues, eigenvectors = eigsh(covariance_matrix, k=n_images - 1, which='LM')  # 'LM' -> Largest Magnitude
-    # plt.plot(eigenvalues)
+    # noise_patches_norm = 0
+    # for i in range(n_images):
+    #     noise_patches_norm += np.linalg.norm(noise_patches_sim[i, :, :]-np.mean(noise_patches_sim))**2
+    # noise_patches_norm = noise_patches_norm / n_images
+    # rell_err = (noise_patches_norm-np.sum(eigenvalues))/np.sum(eigenvalues)
+    # # plt.plot(eigenvalues)
     # plt.show()
     Lambda_sqrt = np.diag(np.sqrt(eigenvalues))
     Z = np.random.randn(len(eigenvalues), num_of_exp_noise)
     noise_vec_sim = (eigenvectors @ Lambda_sqrt) @ Z
     # Simulate S_z from noise patches
 
-    batch_size = 100  # Adjust as needed
-    num_samples = noise_vec_sim.shape[1]
-    num_batches = (num_samples + batch_size - 1) // batch_size  # Compute total batches
-
-    # Get output shape of one batch to preallocate
-    first_batch_size = min(batch_size, num_samples)  # Handle small datasets
-    sample_output = projected_noise_simulation_from_noise_patches_tf(
-        noise_vec_sim[:, :first_batch_size], sorted_basis_images
-    )
-
-    # Determine output dimensions
-    output_dim = sample_output.shape[0]  # Assuming square output
+    # batch_size = 100  # Adjust as needed
+    # num_samples = noise_vec_sim.shape[1]
+    # num_batches = (num_samples + batch_size - 1) // batch_size  # Compute total batches
+    #
+    # # Get output shape of one batch to preallocate
+    # first_batch_size = min(batch_size, num_samples)  # Handle small datasets
+    # sample_output = projected_noise_simulation_from_noise_patches_tf(
+    #     noise_vec_sim[:, :first_batch_size], sorted_basis_images
+    # )
+    #
+    # # Determine output dimensions
+    # output_dim = sample_output.shape[0]  # Assuming square output
 
     # Preallocate array with the correct shape
-    S_z_tf = np.zeros((output_dim, output_dim, num_samples), dtype=sample_output.dtype)
-
-    for batch_idx, s in enumerate(range(0, num_samples, batch_size), start=1):
-        e = min(s + batch_size, num_samples)  # Compute end index
-        batch_noise_vec_sim = noise_vec_sim[:, s:e]
-
-        print(f"Processing batch {batch_idx} of {num_batches}, batch size: {e - s}")  # Track progress
-
-        # Compute the batch projection
-        batch_S_z_tf = projected_noise_simulation_from_noise_patches_tf(
-            batch_noise_vec_sim, sorted_basis_images
-        )
-
-        # Ensure batch_S_z_tf has shape (output_dim, output_dim, batch_size or smaller)
-        S_z_tf[:, :, s:e] = batch_S_z_tf  # Assign batch results
-    z_max = np.max(S_z_tf, axis=(0, 1)).reshape(-1, 1)
-
+    # S_z_tf = np.zeros((output_dim, output_dim, num_samples), dtype=sample_output.dtype)
+    #
+    # for batch_idx, s in enumerate(range(0, num_samples, batch_size), start=1):
+    #     e = min(s + batch_size, num_samples)  # Compute end index
+    #     batch_noise_vec_sim = noise_vec_sim[:, s:e]
+    #
+    #     print(f"Processing batch {batch_idx} of {num_batches}, batch size: {e - s}")  # Track progress
+    #
+    #     # Compute the batch projection
+    #     batch_S_z_tf = projected_noise_simulation_from_noise_patches_tf(
+    #         batch_noise_vec_sim, sorted_basis_images
+    #     )
+    #
+    #     # Ensure batch_S_z_tf has shape (output_dim, output_dim, batch_size or smaller)
+    #     S_z_tf[:, :, s:e] = batch_S_z_tf  # Assign batch results
+    S_z_sci = projected_noise_simulation_from_noise_patches_scipy(noise_vec_sim-np.mean(noise_vec_sim), sorted_basis_images)
+    # print(np.linalg.norm(S_z_sci - S_z_tf) / np.linalg.norm(S_z_sci))
+    # z_max = np.max(S_z_tf, axis=(0, 1)).reshape(-1, 1)
+    z_max = np.max(S_z_sci, axis=(0, 1)).reshape(-1, 1)
     # Step 4: Compute Peaks
     centerd_Y = Y - np.mean(noise_patches_sim)
-    Y_peaks, Y_peaks_loc, S = peak_algorithm_cont_mask_tf(
+    Y_peaks, Y_peaks_loc, S = peak_algorithm_cont_mask_scipy(
         centerd_Y, sorted_basis_images, np.floor(sideLengthAlgorithmL),contamination_mask_binary,
         obj_sz_down_scaled=obj_sz_down_scaled)
     plt.plot(z_max)
@@ -261,7 +268,7 @@ for mrc_file in files_micro:
 
     # Step 5: BH algorithm
     test_val = test_function_real_data(z_max, Y_peaks)
-    M_L = (Y.shape[0] * Y.shape[1]) / ((S_z_tf.shape[0] / (np.sqrt(2))) ** 2)
+    M_L = (Y.shape[0] * Y.shape[1]) / ((S_z_sci.shape[0] / (np.sqrt(2))) ** 2)
 
     K_bh = BH(test_val, alpha, M_L)
     print(microName, K_bh, sorted_basis_images.shape[2])

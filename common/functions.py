@@ -18,6 +18,7 @@ from aspire.image import Image as AspireImage
 # import matplotlib.pyplot as plt
 # from numba import jit, prange
 import tensorflow as tf
+from scipy import signal
 from matplotlib.patches import Circle
 import mrcfile
 import re
@@ -1013,6 +1014,20 @@ def projected_noise_simulation_from_noise_patches_para_fast_tf(noise_samples, ba
 
     return np.transpose(S_z_n, (1, 2, 0))  # Match expected output shape
 
+
+def projected_noise_simulation_from_noise_patches_scipy(noise_samples, basis):
+    noise_samples = noise_samples.astype(np.float32)
+    basis = basis.astype(np.float32)
+    conv_sz_valid = int(np.sqrt(noise_samples.shape[0])) - basis.shape[0] + 1
+    img_sz = int(np.sqrt(noise_samples.shape[0]))
+    S_z = np.zeros((conv_sz_valid, conv_sz_valid,noise_samples.shape[1]), dtype=np.float32)
+    flipped_basis = np.zeros(basis.shape)
+    for n in range(basis.shape[2]):
+        flipped_basis[:,:,n] = np.flip(np.flip(basis[:,:,n], axis=0), axis=1)
+    for i in range(noise_samples.shape[1]):
+        for j in range(basis.shape[2]):
+            S_z[:, :, i] += signal.convolve2d(np.reshape(noise_samples[:, i], (img_sz, img_sz)), flipped_basis[:, :, j],mode='valid') ** 2
+    return S_z
 def peak_algorithm_cont_mask_tf(img, basis, sideLengthAlgorithm, contamination_mask=None, obj_sz_down_scaled=None,
                              contamination_threshold=0.5, debug=False):
     """
@@ -1053,6 +1068,85 @@ def peak_algorithm_cont_mask_tf(img, basis, sideLengthAlgorithm, contamination_m
         S += tf.nn.conv2d(img_shape, flipped_basis_shape, strides=[1, 1, 1, 1], padding='SAME') ** 2
 
     S = tf.squeeze(S).numpy()
+    scoringMat = S.copy()
+    scoringMat[:obj_sz // 2, :] = 0
+    scoringMat[:, :obj_sz // 2] = 0
+    scoringMat[-obj_sz // 2:, :] = 0
+    scoringMat[:, -obj_sz // 2:] = 0
+    rows, cols = np.ogrid[:scoringMat.shape[0], :scoringMat.shape[1]]
+    while True:
+        pMax = np.max(scoringMat)
+        if pMax <= 0:
+            break
+        I = np.argmax(scoringMat)
+        i_row, i_col = np.unravel_index(I, scoringMat.shape)
+
+        # Check for contamination if mask is provided
+        if contamination_mask is not None and obj_sz_down_scaled is not None:
+            half_patch = obj_sz_down_scaled // 2
+            row_start = max(0, i_row - half_patch)
+            row_end = min(contamination_mask.shape[0], i_row + half_patch)
+            col_start = max(0, i_col - half_patch)
+            col_end = min(contamination_mask.shape[1], i_col + half_patch)
+
+            # Skip contaminated regions
+            if np.any(contamination_mask[row_start:row_end, col_start:col_end] > contamination_threshold):
+                row_start = max(0, i_row - rDelAlgorithm)
+                row_end = min(scoringMat.shape[0], i_row + rDelAlgorithm + 1)
+                col_start = max(0, i_col - rDelAlgorithm)
+                col_end = min(scoringMat.shape[1], i_col + rDelAlgorithm + 1)
+                scoringMat[row_start:row_end, col_start:col_end] = 0
+                continue
+
+        # If not contaminated, save peak information
+
+        mask = (rows - i_row) ** 2 + (cols - i_col) ** 2 <= rDelAlgorithm ** 2
+        scoringMat[mask] = 0
+        peaks.append(pMax)
+        peaks_loc.append([i_row, i_col])
+
+
+    return np.array(peaks), np.array(peaks_loc), S
+
+def peak_algorithm_cont_mask_scipy(img, basis, sideLengthAlgorithm, contamination_mask=None, obj_sz_down_scaled=None,
+                             contamination_threshold=0.5, debug=False):
+    """
+    Identify peaks in an image using convolution with basis functions, avoiding contaminated areas if a mask is provided.
+
+    Parameters:
+    img                : Input image (2D NumPy array).
+    basis              : Array of basis functions (3D NumPy array).
+    sideLengthAlgorithm: Length parameter for peak extraction.
+    contamination_mask : (Optional) Downsampled binary contamination mask (2D NumPy array).
+    obj_sz_down_scaled : (Optional) Size of object patch to consider when checking contamination.
+    contamination_threshold : (float) Threshold for contamination mask.
+    debug              : (bool) Enable debugging visualization.
+
+    Returns:
+    peaks     : List of peak values.
+    peaks_loc : List of peak locations (coordinates).
+    S         : Scoring map from convolution.
+    """
+    img = img.astype(np.float32)
+
+    basis = basis.astype(np.float32)
+    num_of_basis_functions = basis.shape[2]
+    rDelAlgorithm = round(sideLengthAlgorithm // 2)
+
+    peaks = []
+    peaks_loc = []
+    obj_sz = basis.shape[0]
+
+    # Perform convolution and sum over basis functions
+    S = np.zeros_like(img, dtype=np.float32)
+    flipped_basis = np.zeros(basis.shape)
+    for n in range(basis.shape[2]):
+        flipped_basis[:,:,n] = np.flip(np.flip(basis[:,:,n], 0), 1)
+    for n in range(basis.shape[2]):
+        # S += signal.fftconvolve(img, flipped_basis[:, :, n], mode='same') ** 2
+        S += signal.convolve2d(img, flipped_basis[:, :, n], mode='same') ** 2
+
+
     scoringMat = S.copy()
     scoringMat[:obj_sz // 2, :] = 0
     scoringMat[:, :obj_sz // 2] = 0
