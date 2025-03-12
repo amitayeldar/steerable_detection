@@ -223,39 +223,7 @@ for mrc_file in files_micro:
     Z = np.random.randn(len(eigenvalues), num_of_exp_noise)
     noise_vec_sim = (eigenvectors @ Lambda_sqrt) @ Z
     # Simulate S_z from noise patches
-
-    # batch_size = 100  # Adjust as needed
-    # num_samples = noise_vec_sim.shape[1]
-    # num_batches = (num_samples + batch_size - 1) // batch_size  # Compute total batches
-    #
-    # # Get output shape of one batch to preallocate
-    # first_batch_size = min(batch_size, num_samples)  # Handle small datasets
-    # sample_output = projected_noise_simulation_from_noise_patches_tf(
-    #     noise_vec_sim[:, :first_batch_size], sorted_basis_images
-    # )
-    #
-    # # Determine output dimensions
-    # output_dim = sample_output.shape[0]  # Assuming square output
-
-    # Preallocate array with the correct shape
-    # S_z_tf = np.zeros((output_dim, output_dim, num_samples), dtype=sample_output.dtype)
-    #
-    # for batch_idx, s in enumerate(range(0, num_samples, batch_size), start=1):
-    #     e = min(s + batch_size, num_samples)  # Compute end index
-    #     batch_noise_vec_sim = noise_vec_sim[:, s:e]
-    #
-    #     print(f"Processing batch {batch_idx} of {num_batches}, batch size: {e - s}")  # Track progress
-    #
-    #     # Compute the batch projection
-    #     batch_S_z_tf = projected_noise_simulation_from_noise_patches_tf(
-    #         batch_noise_vec_sim, sorted_basis_images
-    #     )
-    #
-    #     # Ensure batch_S_z_tf has shape (output_dim, output_dim, batch_size or smaller)
-    #     S_z_tf[:, :, s:e] = batch_S_z_tf  # Assign batch results
     S_z_sci = projected_noise_simulation_from_noise_patches_scipy(noise_vec_sim-np.mean(noise_vec_sim), sorted_basis_images)
-    # print(np.linalg.norm(S_z_sci - S_z_tf) / np.linalg.norm(S_z_sci))
-    # z_max = np.max(S_z_tf, axis=(0, 1)).reshape(-1, 1)
     z_max = np.max(S_z_sci, axis=(0, 1)).reshape(-1, 1)
     # Step 4: Compute Peaks
     centerd_Y = Y - np.mean(noise_patches_sim)
