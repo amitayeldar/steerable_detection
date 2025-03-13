@@ -113,7 +113,7 @@ for mrc_file in files_micro:
         # Think about it
         num_of_exp_noise = np.max(
             [10 ** 3, int(0.2 * M_L_est / alpha)])  # Test value, should be: 1/num_of_exp_noise~alpha/M_L
-        num_of_exp_noise = 10**5
+        num_of_exp_noise =np.min([num_of_exp_noise,10**5])
         dSampleSz = (int(np.floor(mgScale * mgBig.shape[0])), int(np.floor(mgScale * mgBig.shape[1])))
         Y = downsample(mgBig, (dSampleSz[1], dSampleSz[0]))
     # contamination detection
