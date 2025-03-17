@@ -1346,7 +1346,7 @@ def BH(p_val, alpha, M_L):
     K = -1
     for l in range(len(p_val)):
         # Check the BH condition
-        if p_val[l] > (l * alpha) / M_L :
+        if p_val[l] > ((l+1) * alpha) / M_L :
             K = l
             break
 
